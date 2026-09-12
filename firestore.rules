@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // ---------- المنتجات ----------
+    // القراءة متاحة للجميع (حتى الزوار غير المسجلين) لعرض الكتالوج
+    // الكتابة (إضافة / تعديل / حذف) مسموحة فقط لحساب الأدمن
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------- حسابات المستخدمين ----------
+    // كل مستخدم يقرأ/يعدّل ملفه الشخصي فقط (بدون تغيير دوره)
+    // الأدمن يقدر يقرأ الكل ويغيّر الأدوار يدوياً من الكونسول
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() &&
+        request.auth.uid == userId &&
+        request.resource.data.role == 'customer';
+      allow update: if isSignedIn() &&
+        request.auth.uid == userId &&
+        request.resource.data.role == resource.data.role; // ما يقدر يغيّر دوره بنفسه
+      allow delete: if false;
+    }
+
+    // ---------- الطلبات ----------
+    // الزبون يضيف طلب باسمه فقط، ويقرأ طلباته فقط
+    // الأدمن يقرأ ويعدّل كل الطلبات (لتحديث الحالة)
+    match /orders/{orderId} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- رسائل التواصل ----------
+    // أي شخص (مسجل أو زائر) يقدر يرسل رسالة
+    // فقط الأدمن يقدر يقرأها أو يعدّلها
+    match /messages/{messageId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
